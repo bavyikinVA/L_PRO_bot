@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Виртуальное окружение
+.venv/
+env/
+venv/
+
+# Файлы IDE и редакторов
+.idea/
+*.sublime-project
+*.sublime-workspace
+.vscode/
+
+# Переменные окружения
+.env
+
+# Базы данных и миграции
+*.sqlite3
+*.db
+alembic.ini
+
+# Логи
+*.log
+
+# Статические и временные файлы
+/static/uploads/
+/static/cache/
+/static/images/
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Отчёты о покрытии тестами
+coverage/
+.coverage
+htmlcov/
