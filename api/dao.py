@@ -160,17 +160,17 @@ class BookingDAO(BaseDAO[Booking]):
                 day_schedule = schedule_by_date.get(current_date)
                 day_slots = []
                 if current_date >= datetime.now(MSK).date() and day_schedule and day_schedule.is_working:
-                    # Генерируем слоты согласно расписанию
-                    slot_duration = day_schedule.slot_duration_minutes or duration_minutes
+
+                    slot_step = day_schedule.slot_duration_minutes or 30 # интервалы окон
+                    service_duration = duration_minutes # длительность услуги
                     working_hours = cls.generate_time_slots(
                         day_schedule.start_time,
                         day_schedule.end_time,
-                        slot_duration
-                    )
+                        slot_step)
 
                     for slot_time in working_hours:
                         slot_start = datetime.combine(current_date, slot_time).replace(tzinfo=MSK)
-                        slot_end = slot_start + timedelta(minutes=slot_duration)
+                        slot_end = slot_start + timedelta(minutes=service_duration)
                         if slot_end.time() > day_schedule.end_time:
                             continue
                         is_available = True
@@ -261,7 +261,7 @@ class BookingDAO(BaseDAO[Booking]):
 
             schedule = schedule[0]
             booking_time = booking_datetime.astimezone(MSK).time()
-            if not (schedule.start_time <= booking_time <= schedule.end_time):
+            if not (schedule.start_time <= booking_time < schedule.end_time):
                 raise HTTPException(status_code=400, detail="Время бронирования вне рабочего расписания")
 
             service = await ServiceDAO.find_one_or_none_by_id(session=session, data_id=service_id)
@@ -272,6 +272,11 @@ class BookingDAO(BaseDAO[Booking]):
 
             # Проверка, что слот не занят
             booking_end = booking_datetime + timedelta(minutes=duration_minutes)
+            if booking_end.time() > schedule.end_time:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Услуга не помещается в рабочее время специалиста"
+                )
             query = select(cls.model).where(
                 and_(
                     cls.model.specialist_id == specialist_id,

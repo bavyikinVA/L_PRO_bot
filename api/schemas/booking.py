@@ -11,7 +11,7 @@ class BookingModel(BaseModel):
     user_id: int
     service_id: int
     booking_datetime: datetime
-    duration_minutes: int # длительность берем из услуги или расписания
+    duration_minutes: Optional[int] = None # длительность берем из услуги или расписания
     status: Optional[str] = None
     created_at: Optional[datetime] = None
     reminder_24h_task_id: Optional[str] = None

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List
-from sqlalchemy import Integer, ForeignKey, DateTime, String, Boolean, Date, Time, Index
+from sqlalchemy import Integer, ForeignKey, DateTime, String, Boolean, Date, Time, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import date, time
 from zoneinfo import ZoneInfo
@@ -114,4 +114,7 @@ class Schedule(Base):
     specialist: Mapped["Specialist"] = relationship(
         back_populates="schedules",
         lazy='select'
+    )
+    __table_args__ = (
+        UniqueConstraint("specialist_id", "work_date", name="uq_schedule_specialist_date"),
     )
