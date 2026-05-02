@@ -1,6 +1,5 @@
 # Используем официальный образ Python 3.12 slim как базовый для минимального размера
-FROM python:3.12-slim
-
+FROM python:3.12-slim-bookworm
 # Устанавливаем системные зависимости, необходимые для компиляции и работы
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
