@@ -83,11 +83,22 @@ class BookingService:
                 logger.debug(f"Отправка уведомления пользователю Telegram ID: {user.telegram_id}")
                 notification_time = new_booking.booking_datetime.astimezone(MSK)
                 logger.debug(f'Время для уведомления (MSK): {notification_time}')
+                client_full_name = " ".join(
+                    part for part in [
+                        user.last_name,
+                        user.first_name,
+                        user.patronymic
+                    ]
+                    if part
+                )
+
                 await send_booking_notification(
                     user_id=user.telegram_id,
                     specialist_name=f"{specialist.first_name} {specialist.last_name}",
                     service_name=service.label,
-                    booking_datetime=notification_time
+                    booking_datetime=notification_time,
+                    client_full_name=client_full_name,
+                    client_phone=user.phone_number
                 )
                 logger.debug(f"Уведомление отправлено успешно")
             except Exception as notify_error:

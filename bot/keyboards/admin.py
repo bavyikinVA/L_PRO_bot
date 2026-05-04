@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
-from aiogram.types import WebAppInfo, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.types import WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import settings
 
 
@@ -10,7 +10,7 @@ def get_admin_main_kb():
     builder.button(text="📅 Мои записи", callback_data="my_booking")
     builder.button(text="🔖 Записаться", web_app=WebAppInfo(url=f"{settings.FRONT_SITE}"))
     builder.button(text="ℹ️ О нас", callback_data="about_us")
-    builder.button(text="🔑 Админ панель", callback_data="admin_panel")
+    builder.button(text="🔑 Админ панель", web_app=WebAppInfo(url=f"{settings.FRONT_SITE}/admin"))
     builder.adjust(1)
     return builder.as_markup()
 
@@ -155,22 +155,22 @@ def get_days_of_week(selected_days: set = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_time_interval_kb():
-    builder = ReplyKeyboardBuilder()
-    intervals = ["30", "60", "90", "120"]
-    for interval in intervals:
-        builder.add(KeyboardButton(text=f"{interval} минут"))
+# def get_time_interval_kb():
+#     builder = ReplyKeyboardBuilder()
+#     intervals = ["30", "60", "90", "120"]
+#     for interval in intervals:
+#         builder.add(KeyboardButton(text=f"{interval} минут"))
+#
+#     builder.add(KeyboardButton(text="❌ Отмена"))
+#     builder.adjust(2)
+#     return builder.as_markup(resize_keyboard=True)
 
-    builder.add(KeyboardButton(text="❌ Отмена"))
-    builder.adjust(2)
-    return builder.as_markup(resize_keyboard=True)
 
-
-def get_confirmation_kb():
-    builder = ReplyKeyboardBuilder()
-    builder.add(KeyboardButton(text="✅ Подтвердить"))
-    builder.add(KeyboardButton(text="❌ Отмена"))
-    return builder.as_markup(resize_keyboard=True)
+# def get_confirmation_kb():
+#     builder = ReplyKeyboardBuilder()
+#     builder.add(KeyboardButton(text="✅ Подтвердить"))
+#     builder.add(KeyboardButton(text="❌ Отмена"))
+#     return builder.as_markup(resize_keyboard=True)
 
 
 def get_month_selection_kb() -> InlineKeyboardMarkup:

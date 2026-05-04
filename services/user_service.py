@@ -77,6 +77,34 @@ class UserService:
             await session.rollback()
             raise HTTPException(status_code=500, detail="Ошибка при обновлении пользователя")
 
+    @staticmethod
+    async def create_user_by_admin(session: AsyncSession, user_data: UserModel) -> UserModel:
+        logger.info(f"Создание клиента админом: {user_data.model_dump()}")
+
+        if not user_data.phone_number:
+            raise HTTPException(status_code=400, detail="Номер телефона обязателен")
+
+        if not user_data.first_name:
+            raise HTTPException(status_code=400, detail="Имя обязательно")
+
+        existing_user = await UserDAO.find_existing_user(
+            session=session,
+            first_name=user_data.first_name,
+            last_name=user_data.last_name,
+            phone_number=user_data.phone_number
+        )
+
+        if existing_user:
+            return existing_user
+
+        new_user = await UserDAO.add(
+            session=session,
+            values=user_data,
+            commit=True
+        )
+
+        return UserModel.model_validate(new_user)
+
 
     @staticmethod
     async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> Optional[UserModel] or None:

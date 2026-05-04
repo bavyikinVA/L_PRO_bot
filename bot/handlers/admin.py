@@ -13,7 +13,7 @@ from api.dao import SpecialistDAO, ScheduleDAO
 from api.schemas import ServiceCreate, UserModel, SpecialistCreate, ServiceUpdate, \
     SpecialistServiceCreate, SpecialistUpdate
 from bot.keyboards.admin import get_admin_functions_kb, get_service_fields_kb, get_admin_full_kbs, \
-    get_masters_list_kb, get_days_of_week, get_time_interval_kb, get_confirmation_kb, get_service_list_kb, \
+    get_masters_list_kb, get_days_of_week, get_service_list_kb, \
     get_month_selection_kb, get_specialist_fields_kb
 from bot.states.admin import AdminStates, CreateNewUserStates, CreateNewMasterStates, AddToMasterServiceStates, \
     SetMasterScheduleStates, UpdateMasterStates
@@ -752,32 +752,32 @@ async def process_days_confirmation(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Произошла ошибка")
 
 
-@router.message(SetMasterScheduleStates.waiting_for_time_range)
-async def process_time_range(message: Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await state.clear()
-        await message.answer("❌ Отменено", reply_markup=get_admin_functions_kb())
-        return
-
-    try:
-        start_str, end_str = message.text.split("-")
-        start_time = datetime.strptime(start_str.strip(), "%H:%M").time()
-        end_time = datetime.strptime(end_str.strip(), "%H:%M").time()
-
-        if start_time >= end_time:
-            await message.answer("❌ Время начала должно быть раньше времени окончания")
-            return
-
-        await state.update_data(start_time=start_time, end_time=end_time)
-
-        await message.answer(
-            "⏱ Выберите интервал между записями:",
-            reply_markup=get_time_interval_kb()
-        )
-        await state.set_state(SetMasterScheduleStates.waiting_for_interval)
-
-    except ValueError:
-        await message.answer("❌ Неверный формат. Используйте ЧЧ:MM-ЧЧ:MM")
+# @router.message(SetMasterScheduleStates.waiting_for_time_range)
+# async def process_time_range(message: Message, state: FSMContext):
+#     if message.text == "❌ Отмена":
+#         await state.clear()
+#         await message.answer("❌ Отменено", reply_markup=get_admin_functions_kb())
+#         return
+#
+#     try:
+#         start_str, end_str = message.text.split("-")
+#         start_time = datetime.strptime(start_str.strip(), "%H:%M").time()
+#         end_time = datetime.strptime(end_str.strip(), "%H:%M").time()
+#
+#         if start_time >= end_time:
+#             await message.answer("❌ Время начала должно быть раньше времени окончания")
+#             return
+#
+#         await state.update_data(start_time=start_time, end_time=end_time)
+#
+#         await message.answer(
+#             "⏱ Выберите интервал между записями:",
+#             reply_markup=get_time_interval_kb()
+#         )
+#         await state.set_state(SetMasterScheduleStates.waiting_for_interval)
+#
+#     except ValueError:
+#         await message.answer("❌ Неверный формат. Используйте ЧЧ:MM-ЧЧ:MM")
 
 
 @router.callback_query(SetMasterScheduleStates.waiting_for_days_selection, F.data == "cancel_schedule")
@@ -790,37 +790,37 @@ async def cancel_schedule(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(SetMasterScheduleStates.waiting_for_interval)
-async def process_interval(message: Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await state.clear()
-        await message.answer("❌ Отменено", reply_markup=get_admin_functions_kb())
-        return
-    try:
-        interval = int(message.text.split()[0])
-        data = await state.get_data()
-        # Формируем summary
-        selected_days = data["selected_days"]
-        day_names = {
-            "mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт",
-            "fri": "Пт", "sat": "Сб", "sun": "Вс"
-        }
-        days_str = ", ".join([day_names[day] for day in selected_days])
-
-        summary = (
-            f"📋 Подтвердите настройки:\n\n"
-            f"👨‍💼 Мастер: {data['master_name']}\n"
-            f"📅 Дни: {days_str}\n"
-            f"⏰ Время: {data['start_time'].strftime('%H:%M')}-{data['end_time'].strftime('%H:%M')}\n"
-            f"⏱ Интервал: {interval} минут\n\n"
-            f"Будет {'обновлено' if data['target_month'] == datetime.now().month else 'создано'} расписание."
-        )
-
-        await state.update_data(interval=interval)
-        await message.answer(summary, reply_markup=get_confirmation_kb())
-        await state.set_state(SetMasterScheduleStates.waiting_for_confirmation)
-    except (ValueError, IndexError):
-        await message.answer("❌ Неверный формат. Выберите интервал из списка")
+# @router.message(SetMasterScheduleStates.waiting_for_interval)
+# async def process_interval(message: Message, state: FSMContext):
+#     if message.text == "❌ Отмена":
+#         await state.clear()
+#         await message.answer("❌ Отменено", reply_markup=get_admin_functions_kb())
+#         return
+#     try:
+#         interval = int(message.text.split()[0])
+#         data = await state.get_data()
+#         # Формируем summary
+#         selected_days = data["selected_days"]
+#         day_names = {
+#             "mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт",
+#             "fri": "Пт", "sat": "Сб", "sun": "Вс"
+#         }
+#         days_str = ", ".join([day_names[day] for day in selected_days])
+#
+#         summary = (
+#             f"📋 Подтвердите настройки:\n\n"
+#             f"👨‍💼 Мастер: {data['master_name']}\n"
+#             f"📅 Дни: {days_str}\n"
+#             f"⏰ Время: {data['start_time'].strftime('%H:%M')}-{data['end_time'].strftime('%H:%M')}\n"
+#             f"⏱ Интервал: {interval} минут\n\n"
+#             f"Будет {'обновлено' if data['target_month'] == datetime.now().month else 'создано'} расписание."
+#         )
+#
+#         await state.update_data(interval=interval)
+#         await message.answer(summary, reply_markup=get_confirmation_kb())
+#         await state.set_state(SetMasterScheduleStates.waiting_for_confirmation)
+#     except (ValueError, IndexError):
+#         await message.answer("❌ Неверный формат. Выберите интервал из списка")
 
 
 @router.message(SetMasterScheduleStates.waiting_for_confirmation)

@@ -6,7 +6,6 @@ from bot.keyboards.common import get_main_kb
 from config import settings
 
 
-
 def get_greeting_text(first_name: str, is_old_user: bool):
     if is_old_user:
         return f"""
@@ -88,22 +87,55 @@ def format_appointment(specialist_name: str, service_name: str, booking_datetime
 """
 
 
-async def send_booking_notification(user_id: int, specialist_name: str, service_name: str, booking_datetime: datetime):
+async def send_booking_notification(
+        user_id: int | None,
+        specialist_name: str,
+        service_name: str,
+        booking_datetime: datetime,
+        client_full_name: str | None = None,
+        client_phone: str | None = None,
+):
     bot = Bot(token=settings.BOT_TOKEN)
+
     try:
-        await bot.send_message(
-            chat_id=user_id,
-            text=(
-                f"✅ Ваша запись успешно создана!\n\n"
-                f"👨‍💼 Специалист: {specialist_name}\n"
-                f"💆 Услуга: {service_name}\n"
-                f"📅 Дата и время: {booking_datetime.strftime('%d.%m.%Y %H:%M')}"
-                f"\n\n"
-                f"Пожалуйста, приходите за 5-10 минут до назначенного времени."),
-            parse_mode="HTML", reply_markup=get_main_kb()
+        if user_id:
+            await bot.send_message(
+                chat_id=user_id,
+                text=(
+                    f"✅ Ваша запись успешно создана!\n\n"
+                    f"👨‍💼 Специалист: {specialist_name}\n"
+                    f"💆 Услуга: {service_name}\n"
+                    f"📅 Дата и время: {booking_datetime.strftime('%d.%m.%Y %H:%M')}\n\n"
+                    f"Пожалуйста, приходите за 5-10 минут до назначенного времени."
+                ),
+                parse_mode="HTML",
+                reply_markup=get_main_kb()
+            )
+            logger.info(f"Уведомление отправлено пользователю ID {user_id}")
+        else:
+            logger.info("У клиента нет telegram_id, уведомление клиенту пропущено")
+
+        admin_text = (
+            f"🔔 <b>Новая запись клиента</b>\n\n"
+            f"👤 Клиент: {client_full_name or 'не указан'}\n"
+            f"📞 Телефон: {client_phone or 'не указан'}\n"
+            f"👨‍💼 Мастер: {specialist_name}\n"
+            f"💆 Услуга: {service_name}\n"
+            f"📅 Дата и время: {booking_datetime.strftime('%d.%m.%Y %H:%M')}"
         )
-        logger.info(f"Уведомление отправлено пользователю ID {user_id}")
+
+        for admin_id in settings.ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=admin_text,
+                    parse_mode="HTML"
+                )
+                logger.info(f"Уведомление отправлено админу ID {admin_id}")
+            except Exception as admin_error:
+                logger.error(f"Ошибка при отправке админу ID {admin_id}: {admin_error}")
+
     except Exception as e:
-        logger.error(f"Ошибка при отправке уведомления пользователю ID {user_id}: {str(e)}")
+        logger.error(f"Ошибка при отправке уведомлений о записи: {str(e)}")
     finally:
         await bot.session.close()

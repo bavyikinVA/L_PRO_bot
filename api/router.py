@@ -1,7 +1,8 @@
 import pytz
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dao import ScheduleDAO
@@ -9,9 +10,10 @@ from api.schemas import (
     SpecialistCreate,
     ServiceCreate,
     SpecialistServiceCreate,
-    ServiceUpdate, SpecialistModel, ServiceModel, BookingModel, SpecialistScheduleModel, SpecialistUpdate)
+    ServiceUpdate, SpecialistModel, ServiceModel, BookingModel, SpecialistScheduleModel, SpecialistUpdate, UserModel)
 from database.database import db
-
+from api.admin_auth import require_admin
+from database.models import User
 from services.booking_service import BookingService
 from services.schedule_service import ScheduleService
 from services.service_service import ServiceService
@@ -202,3 +204,114 @@ async def delete_specialist_schedule(specialist_id: int,
 async def get_user(telegram_id: int, session: AsyncSession = Depends(db.get_db)) -> int:
     user = await (UserService.get_user_by_telegram_id(session, telegram_id))
     return user.id
+
+
+@api_router.get("/admin/me", summary="Проверить доступ к админке", tags=["Admin"])
+async def get_admin_me(admin_user: dict = Depends(require_admin)):
+    return {
+        "ok": True,
+        "telegram_id": admin_user.get("id"),
+        "first_name": admin_user.get("first_name"),
+        "username": admin_user.get("username"),
+    }
+
+@api_router.post("/admin/users",
+                 summary="Добавить клиента вручную",
+                 tags=["Admin User Endpoints"])
+async def create_user_by_admin(
+        user_data: UserModel,
+        admin_user: dict = Depends(require_admin),
+        session: AsyncSession = Depends(db.get_db_with_commit)
+) -> UserModel:
+    user_data.telegram_id = None
+    user_data.username = None
+    user_data.is_admin = False
+
+    return await UserService.create_user_by_admin(session, user_data)
+
+@api_router.get("/admin/users",
+                summary="Получить список клиентов",
+                tags=["Admin User Endpoints"])
+async def get_admin_users(
+        admin_user: dict = Depends(require_admin),
+        session: AsyncSession = Depends(db.get_db)
+) -> List[UserModel]:
+    result = await session.execute(
+        select(User).order_by(User.id)
+    )
+
+    users = result.scalars().all()
+
+    return [UserModel.model_validate(user) for user in users]
+
+@api_router.post("/admin/schedules/generate",
+                 summary="Сгенерировать рабочее время мастера",
+                 tags=["Admin Schedule Endpoints"])
+async def generate_admin_schedule(
+        specialist_id: int = Body(...),
+        working_days: List[str] = Body(...),
+        start_time: str = Body(...),
+        end_time: str = Body(...),
+        slot_duration_minutes: int = Body(...),
+        target_month: int = Body(...),
+        target_year: int = Body(...),
+        admin_user: dict = Depends(require_admin),
+        session: AsyncSession = Depends(db.get_db_with_commit)
+):
+    try:
+        parsed_start_time = datetime.strptime(start_time, "%H:%M").time()
+        parsed_end_time = datetime.strptime(end_time, "%H:%M").time()
+
+        if parsed_start_time >= parsed_end_time:
+            raise HTTPException(
+                status_code=400,
+                detail="Время начала должно быть раньше времени окончания"
+            )
+
+        if not working_days:
+            raise HTTPException(
+                status_code=400,
+                detail="Выберите хотя бы один рабочий день"
+            )
+
+        schedule_dao = ScheduleDAO()
+        now = datetime.now()
+
+        if target_month == now.month and target_year == now.year:
+            schedules = await schedule_dao.update_monthly_schedule(
+                session=session,
+                specialist_id=specialist_id,
+                working_days=working_days,
+                start_time=parsed_start_time,
+                end_time=parsed_end_time,
+                slot_duration_minutes=slot_duration_minutes,
+                target_month=target_month,
+                target_year=target_year
+            )
+            action = "обновлено"
+        else:
+            schedules = await schedule_dao.generate_monthly_schedule(
+                session=session,
+                specialist_id=specialist_id,
+                working_days=working_days,
+                start_time=parsed_start_time,
+                end_time=parsed_end_time,
+                slot_duration_minutes=slot_duration_minutes,
+                target_month=target_month,
+                target_year=target_year
+            )
+            action = "создано"
+
+        return {
+            "ok": True,
+            "action": action,
+            "processed_days": len(schedules)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при генерации расписания: {str(e)}"
+        )
