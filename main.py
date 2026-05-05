@@ -9,6 +9,7 @@ from bot.create_bot import dp, bot, stop_bot, start_bot
 from api.router import api_router
 from config import settings
 from database.database import async_session_maker
+from services.reminder_service import ReminderService
 
 
 async def send_admin_msg(client, text):
@@ -21,7 +22,7 @@ async def send_admin_msg(client, text):
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app):
     logger.info("Starting bot setup...")
     await start_bot()
     webhook_url = settings.get_webhook_url()
@@ -31,6 +32,9 @@ async def lifespan(app: FastAPI):
         drop_pending_updates=True
     )
     logger.info(f"Webhook set to {webhook_url}")
+    async with async_session_maker() as session:
+        restored = await ReminderService.recover_queue(session)
+        logger.info(f"Очередь напоминаний восстановлена. Задач: {restored}")
     yield
     logger.info("Shutting down bot...")
     await bot.delete_webhook()

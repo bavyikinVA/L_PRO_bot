@@ -1,13 +1,27 @@
-import requests
-from loguru import logger
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from config import settings
+import requests
+from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
+
 from celery_app import app
-from services.sync_database import get_booking_with_relations
+from config import settings
+from database.models import Booking, BookingReminder
+from services.sync_database import SyncSessionLocal
 
 MSK = ZoneInfo("Europe/Moscow")
+
+
+def get_hour_word(hours_before: int) -> str:
+    if hours_before == 1:
+        return "час"
+    if hours_before in (6, 12):
+        return "часов"
+    if hours_before == 24:
+        return "часа"
+    return "часов"
 
 
 def send_reminder_notification(
@@ -16,22 +30,23 @@ def send_reminder_notification(
         service_name: str,
         booking_datetime: datetime,
         hours_before: int
-):
-    """Синхронная функция для отправки напоминания через Telegram API."""
+) -> bool:
+    """Синхронная отправка напоминания через Telegram Bot API."""
+
     logger.info(f"Отправка напоминания пользователю ID {user_id} за {hours_before} ч.")
+
     try:
-        booking_dt_msk = booking_datetime.astimezone(MSK) if booking_datetime.tzinfo else booking_datetime.replace(
-            tzinfo=MSK)
-        change = ""
-        if hours_before == 1:
-            change = 'час'
-        elif hours_before == 6 or hours_before == 12:
-            change = 'часов'
-        elif hours_before == 24:
-            change = 'часа'
+        booking_dt_msk = (
+            booking_datetime.astimezone(MSK)
+            if booking_datetime.tzinfo
+            else booking_datetime.replace(tzinfo=MSK)
+        )
+
+        hour_word = get_hour_word(hours_before)
+
         message = (
             f"⏰ <b>Напоминание о записи!</b>\n\n"
-            f"⏳ Через <b>{hours_before} {change}</b> у вас запись!\n\n"
+            f"⏳ Через <b>{hours_before} {hour_word}</b> у вас запись!\n\n"
             f"👨‍💼 Специалист: {specialist_name}\n"
             f"💆 Услуга: {service_name}\n"
             f"📅 Дата и время: <b>{booking_dt_msk.strftime('%d.%m.%Y %H:%M')}</b>\n\n"
@@ -44,80 +59,127 @@ def send_reminder_notification(
             "text": message,
             "parse_mode": "HTML"
         }
-        logger.debug(f"Отправка запроса к Telegram API: {url}")
-        response = requests.post(url, json=payload)
+
+        response = requests.post(url, json=payload, timeout=15)
         response.raise_for_status()
+
         logger.info(f"Напоминание успешно отправлено пользователю ID {user_id} за {hours_before} ч.")
         return True
+
     except Exception as e:
         logger.error(f"Ошибка при отправке напоминания пользователю ID {user_id}: {str(e)}")
         return False
 
 
-@app.task(bind=True)
-def send_reminder(self, booking_id: int, hours_before: int):
-    """Синхронная Celery задача для отправки напоминания."""
+@app.task(bind=True, max_retries=3)
+def send_reminder(self, reminder_id: int):
+    """
+    Celery-задача отправки напоминания.
+
+    Важно:
+    - reminder_id — это ID строки из booking_reminders.
+    - БД является источником истины.
+    - Celery/Redis только доставляют задачу.
+    """
+
     task_id = self.request.id
-    logger.info(f"Начало выполнения задачи напоминания для брони {booking_id}, task_id={task_id}")
+    logger.info(f"Запуск напоминания reminder_id={reminder_id}, task_id={task_id}")
 
-    try:
-        booking = get_booking_with_relations(booking_id)
+    with SyncSessionLocal() as session:
+        try:
+            reminder = session.execute(
+                select(BookingReminder)
+                .where(reminder_id == BookingReminder.id)
+            ).scalar_one_or_none()
 
-        if not booking:
-            logger.warning(f"Бронь ID {booking_id} не найдена для напоминания {task_id}")
-            return {"status": "skipped", "reason": "booking_not_found"}
+            if not reminder:
+                logger.warning(f"Напоминание ID={reminder_id} не найдено")
+                return {"status": "skipped", "reason": "reminder_not_found"}
 
-        logger.debug(
-            f"Найдена бронь: ID={booking_id}, status={booking.status}, is_cancelled={booking.is_cancelled}")
+            if reminder.status in ["sent", "cancelled", "skipped", "processing"]:
+                logger.info(f"Напоминание ID={reminder_id} уже обработано: {reminder.status}")
+                return {"status": "skipped", "reason": f"already_{reminder.status}"}
 
-        if booking.status != "confirmed" or booking.is_cancelled:
-            logger.info(f"Бронь ID {booking_id} отменена/не подтверждена, напоминание {task_id} пропущено")
-            return {"status": "skipped", "reason": "booking_cancelled"}
+            if reminder.status != "scheduled":
+                logger.info(f"Напоминание ID={reminder_id} имеет неподходящий статус: {reminder.status}")
+                return {"status": "skipped", "reason": f"status_{reminder.status}"}
 
-        current_msk = datetime.now(MSK)
-        booking_dt_msk = booking.booking_datetime.astimezone(MSK)
-        time_until_booking = booking_dt_msk - current_msk
-        actual_hours_left = time_until_booking.total_seconds() / 3600
-        logger.debug(f"Время до брони: {actual_hours_left:.1f}ч, ожидалось: {hours_before}ч")
+            reminder.status = "processing"
+            session.commit()
 
-        if actual_hours_left < (hours_before - 0.25):
-            logger.warning(
-                f"Напоминание устарело: ожидалось {hours_before}ч, осталось {actual_hours_left:.1f}ч. "
-                f"Task {task_id} отменен"
+            booking = session.execute(
+                select(Booking)
+                .options(
+                    joinedload(Booking.specialist),
+                    joinedload(Booking.service),
+                    joinedload(Booking.user)
+                )
+                .where(Booking.id == reminder.booking_id)
+            ).scalars().first()
+
+            if not booking:
+                reminder.status = "skipped"
+                reminder.error_message = "booking_not_found"
+                session.commit()
+                return {"status": "skipped", "reason": "booking_not_found"}
+
+            if booking.status != "confirmed" or booking.is_cancelled:
+                reminder.status = "cancelled"
+                reminder.error_message = "booking_cancelled"
+                session.commit()
+                return {"status": "skipped", "reason": "booking_cancelled"}
+
+            now_msk = datetime.now(MSK)
+            booking_dt_msk = booking.booking_datetime.astimezone(MSK)
+
+            if booking_dt_msk <= now_msk:
+                reminder.status = "skipped"
+                reminder.error_message = "booking_already_started"
+                session.commit()
+                return {"status": "skipped", "reason": "booking_already_started"}
+
+            if not booking.user or not booking.specialist or not booking.service:
+                reminder.status = "failed"
+                reminder.error_message = "missing_booking_relations"
+                session.commit()
+                return {"status": "failed", "reason": "missing_booking_relations"}
+
+            success = send_reminder_notification(
+                user_id=booking.user.telegram_id,
+                specialist_name=f"{booking.specialist.first_name} {booking.specialist.last_name}",
+                service_name=booking.service.label,
+                booking_datetime=booking.booking_datetime,
+                hours_before=reminder.hours_before
             )
-            return {"status": "skipped", "reason": "time_expired"}
 
-        specialist = booking.specialist
-        service = booking.service
-        user = booking.user
+            if success:
+                reminder.status = "sent"
+                reminder.sent_at = datetime.now(MSK)
+                reminder.error_message = None
+                session.commit()
 
-        if not specialist or not service or not user:
-            logger.error(f"Не удалось получить данные для брони {booking_id}")
-            return {"status": "failed", "reason": "missing_data"}
+                logger.info(f"Напоминание ID={reminder_id} успешно отправлено")
+                return {"status": "sent", "reminder_id": reminder.id}
 
-        logger.debug(f"Специалист: {specialist.first_name} {specialist.last_name}, Услуга: {service.label}")
+            reminder.status = "failed"
+            reminder.error_message = "notification_failed"
+            session.commit()
 
-        # Отправляем напоминание
-        success = send_reminder_notification(
-            user_id=user.telegram_id,
-            specialist_name=f"{specialist.first_name} {specialist.last_name}",
-            service_name=service.label,
-            booking_datetime=booking.booking_datetime,
-            hours_before=hours_before
-        )
+            logger.warning(f"Напоминание ID={reminder_id} не отправлено, будет retry")
+            raise self.retry(countdown=300)
 
-        if success:
-            logger.info(f"Напоминание за {hours_before}ч успешно отправлено для брони {booking_id}")
-            return {"status": "sent", "booking_id": booking_id, "task_id": task_id}
-        else:
-            logger.error(f"Не удалось отправить напоминание для брони {booking_id}")
-            return {"status": "failed", "reason": "notification_failed"}
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Ошибка в задаче reminder_id={reminder_id}, task_id={task_id}: {str(e)}")
 
-    except Exception as e:
-        logger.error(f"Ошибка в задаче напоминания {task_id}: {str(e)}")
-        if self.request.retries < 3:
-            logger.info(f"Повторная попытка для задачи {task_id} через 5 минут")
-            raise self.retry(countdown=60 * 5)
-        else:
-            logger.error(f"Исчерпаны попытки retry для задачи {task_id}")
-            return {"status": "failed", "error": str(e)}
+            reminder = session.execute(
+                select(BookingReminder)
+                .where(reminder_id == BookingReminder.id)
+            ).scalar_one_or_none()
+
+            if reminder:
+                reminder.status = "failed"
+                reminder.error_message = str(e)[:255]
+                session.commit()
+
+            raise

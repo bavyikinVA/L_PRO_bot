@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime
 from typing import Dict, Any, List
 from zoneinfo import ZoneInfo
 
@@ -13,6 +13,7 @@ from api.schemas import BookingModel
 from bot.utils import send_booking_notification
 from database.database import async_session_maker
 from database.models import Booking, SpecialistService
+from services.reminder_service import ReminderService
 from services.user_service import UserService
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -105,7 +106,7 @@ class BookingService:
                 logger.error(f"Ошибка при отправке уведомления: {str(notify_error)}")
 
             try:
-                await BookingService.schedule_reminders(session=session, booking=new_booking)
+                await ReminderService.create_reminders_for_booking(session=session, booking=new_booking)
             except Exception as reminder_error:
                 logger.warning(f'Ошибка при планировании напоминаний: {str(reminder_error)}')
 
@@ -116,70 +117,6 @@ class BookingService:
             if isinstance(e, HTTPException):
                 raise
             raise HTTPException(status_code=500, detail="Ошибка при создании бронирования")
-
-
-    @staticmethod
-    async def schedule_reminders(session: AsyncSession, booking: Booking):
-        try:
-            from celery_app import app
-
-            reminder_config = [
-                (24, 'reminder_24h_task_id'),
-                (6, 'reminder_6h_task_id'),
-                (1, 'reminder_1h_task_id')
-            ]
-
-            booking_id = booking.id
-            booking_dt = booking.booking_datetime
-
-            if booking_dt.tzinfo is None:
-                booking_dt = booking_dt.replace(tzinfo=timezone.utc)
-
-            current_time_utc = datetime.now(timezone.utc)
-
-            logger.info(f"Планирование напоминаний для брони {booking_id}: {booking_dt.astimezone(MSK)} (MSK)")
-
-            task_updates = {}
-
-            for hours_before, task_id_field in reminder_config:
-                eta_utc = booking_dt - timedelta(hours=hours_before)
-
-                if eta_utc <= current_time_utc:
-                    logger.warning(f"Напоминание за {hours_before}ч для брони {booking_id} пропущено")
-                    task_updates[task_id_field] = None
-                    continue
-
-                task_id = f"reminder_{booking_id}_{hours_before}h"
-                # проверка на наличие задачи перед тем как создать новую (избавление от дубликатов)
-                try:
-                    existing_task = app.AsyncResult(task_id)
-                    if existing_task.state in ['PENDING', 'RETRY', 'STARTED']:
-                        logger.info(f"Задача {task_id} уже существует (статус: {existing_task.state})")
-                        task_updates[task_id_field] = task_id
-                        continue
-                except Exception as check_error:
-                    logger.debug(f"Не удалось проверить задачу {task_id}: {check_error}")
-
-                task = app.send_task(
-                    'services.tasks_service.send_reminder',
-                    args=(booking_id, hours_before),
-                    eta=eta_utc,
-                    task_id=task_id
-                )
-                task_updates[task_id_field] = task.id
-                logger.info(f"Запланировано напоминание за {hours_before}ч: task_id={task.id}")
-
-            # Обновляем booking в отдельной операции
-            for field, value in task_updates.items():
-                setattr(booking, field, value)
-
-            await session.commit()
-            logger.info(f"Напоминания для брони {booking_id} сохранены")
-
-        except Exception as e:
-            logger.error(f"Ошибка при планировании напоминаний: {str(e)}")
-            await session.rollback()
-            raise
 
 
     @staticmethod
@@ -305,7 +242,6 @@ class BookingService:
 
     @staticmethod
     async def cancel_booking(booking_id: int) -> bool:
-        from celery_app import app
         async with async_session_maker() as session:
             try:
                 booking = await BookingService.get_booking(session, booking_id)
@@ -318,42 +254,15 @@ class BookingService:
                     logger.info(f"Бронь ID {booking_id} уже отменена")
                     return True
 
-                # Отменяем Celery задачи
-                task_ids = [
-                    (booking.reminder_24h_task_id, '24h'),
-                    (booking.reminder_6h_task_id, '6h'),
-                    (booking.reminder_1h_task_id, '1h')
-                ]
+                await ReminderService.cancel_reminders_for_booking(session, booking.id)
 
-                revoked_count = 0
-                for task_id, reminder_type in task_ids:
-                    if task_id:
-                        try:
-                            # Проверяем существует ли задача перед отменой
-                            task_result = app.AsyncResult(task_id)
-                            if task_result.state in ['PENDING', 'RETRY']:
-                                app.control.revoke(task_id, terminate=True, signal='SIGTERM')
-                                logger.info(f"Отменена задача {reminder_type} напоминания: {task_id}")
-                                revoked_count += 1
-                            else:
-                                logger.debug(
-                                    f"Задача {task_id} уже выполнена или не существует, статус: {task_result.state}")
-                        except Exception as revoke_error:
-                            logger.error(f"Ошибка при отмене задачи {task_id}: {revoke_error}")
-
-                # Обновляем статус брони
-                booking.status = "cancelled"
                 booking.is_cancelled = True
-
-                # Очищаем task_id отмененных напоминаний
-                booking.reminder_24h_task_id = None
-                booking.reminder_6h_task_id = None
-                booking.reminder_1h_task_id = None
+                booking.status = "cancelled"
 
                 session.add(booking)
                 await session.commit()
 
-                logger.info(f"Бронь {booking_id} успешно отменена. Отменено задач: {revoked_count}")
+                logger.info(f"Бронь {booking_id} успешно отменена.")
                 return True
 
             except Exception as e:

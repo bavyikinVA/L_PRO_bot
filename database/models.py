@@ -1,9 +1,11 @@
+from datetime import date, time
 from datetime import datetime
 from typing import List
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import Integer, ForeignKey, DateTime, String, Boolean, Date, Time, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from datetime import date, time
-from zoneinfo import ZoneInfo
+
 from database.database import Base
 
 
@@ -82,11 +84,7 @@ class Booking(Base):
     booking_datetime: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String, default="confirmed")
     duration_minutes: Mapped[int] = mapped_column(Integer, default=120)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now(ZoneInfo("UTC")))
-
-    reminder_24h_task_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    reminder_6h_task_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    reminder_1h_task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(ZoneInfo("UTC")))
     is_cancelled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     # Relationships
@@ -117,4 +115,35 @@ class Schedule(Base):
     )
     __table_args__ = (
         UniqueConstraint("specialist_id", "work_date", name="uq_schedule_specialist_date"),
+    )
+
+class BookingReminder(Base):
+    __tablename__ = "booking_reminders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    hours_before: Mapped[int] = mapped_column(Integer, nullable=False)
+    remind_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(String, default="pending", nullable=False, index=True)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(ZoneInfo("UTC")),
+        nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("booking_id", "hours_before", name="uq_booking_reminder_once"),
+        Index("ix_booking_reminders_status_remind_at", "status", "remind_at"),
     )
