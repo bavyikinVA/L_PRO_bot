@@ -4,10 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from fastapi.staticfiles import StaticFiles
 from aiogram.types import Update
+from aiogram.exceptions import TelegramBadRequest
 
 from bot.create_bot import dp, bot, stop_bot, start_bot
 from api.router import api_router
 from config import settings
+
 from database.database import async_session_maker
 from services.reminder_service import ReminderService
 
@@ -69,6 +71,23 @@ async def webhook(request: Request) -> None:
         await dp.feed_update(bot, update, session=session)
     logger.info("Update processed")
 
+@app.post("/webhook")
+async def webhook(request: Request):
+    logger.info("Received webhook request")
+    try:
+        update = Update.model_validate(await request.json(), context={"bot": bot})
+        async with async_session_maker() as session:
+            await dp.feed_update(bot, update, session=session)
+        logger.info("Update processed")
+    except TelegramBadRequest as e:
+        error_text = str(e).lower()
+        if "query is too old" in error_text or "query id is invalid" in error_text:
+            logger.warning(f"Старый callback Telegram проигнорирован: {e}")
+        else:
+            logger.exception(f"TelegramBadRequest при обработке webhook: {e}")
+    except Exception as e:
+        logger.exception(f"Ошибка при обработке webhook: {e}")
+    return {"ok": True}
 
 @app.get("/check")
 async def check():

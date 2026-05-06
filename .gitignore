@@ -47,3 +47,8 @@ Desktop.ini
 coverage/
 .coverage
 htmlcov/
+
+node_modules/
+.env.local
+static/images/*
+!static/images/.gitkeep

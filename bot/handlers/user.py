@@ -176,22 +176,24 @@ async def handler_back_home(callback: CallbackQuery):
             reply_markup=(get_admin_main_kb() if callback.from_user.id in settings.ADMIN_IDS else get_main_kb())
         )
 
-
 @router.callback_query(F.data == "my_booking")
 async def handler_my_appointments(callback: CallbackQuery):
+    await callback.answer("Ваши ближайшие записи:")
     async with async_session_maker() as session:
-        await callback.answer("Ваши ближайшие записи:")
-        db_user_id = await UserService.get_user_by_telegram_id(session=session, telegram_id=callback.from_user.id)
-        appointment_count = await BookingService.count_user_booking(session=session, user_id=db_user_id.id)
+        db_user_id = await UserService.get_user_by_telegram_id(
+            session=session,
+            telegram_id=callback.from_user.id)
+        appointment_count = await BookingService.count_user_booking(
+            session=session,
+            user_id=db_user_id.id)
         message_text = get_booking_text(appointment_count)
         keyboard = generate_kb_profile(appointment_count)
         await callback.message.answer(message_text, reply_markup=keyboard)
 
-
 @router.callback_query(F.data.startswith("my_booking_all"))
 async def handler_my_appointments_all(callback: CallbackQuery):
+    await callback.answer("Ваши ближайшие записи (подробно)")
     async with async_session_maker() as session:
-        await callback.answer("Ваши ближайшие записи (подробно)")
         try:
             user = await UserService.get_user_by_telegram_id(session=session, telegram_id=callback.from_user.id)
             logger.debug(

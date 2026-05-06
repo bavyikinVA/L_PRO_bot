@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
@@ -13,6 +13,9 @@ from services.sync_database import SyncSessionLocal
 
 MSK = ZoneInfo("Europe/Moscow")
 
+# допустимая задержка выполнения Celery-задачи.
+MAX_REMINDER_DELAY_SECONDS = 120
+
 
 def get_hour_word(hours_before: int) -> str:
     if hours_before == 1:
@@ -25,11 +28,11 @@ def get_hour_word(hours_before: int) -> str:
 
 
 def send_reminder_notification(
-        user_id: int,
-        specialist_name: str,
-        service_name: str,
-        booking_datetime: datetime,
-        hours_before: int
+    user_id: int,
+    specialist_name: str,
+    service_name: str,
+    booking_datetime: datetime,
+    hours_before: int,
 ) -> bool:
     """Синхронная отправка напоминания через Telegram Bot API."""
 
@@ -57,17 +60,22 @@ def send_reminder_notification(
         payload = {
             "chat_id": user_id,
             "text": message,
-            "parse_mode": "HTML"
+            "parse_mode": "HTML",
         }
 
         response = requests.post(url, json=payload, timeout=15)
         response.raise_for_status()
 
-        logger.info(f"Напоминание успешно отправлено пользователю ID {user_id} за {hours_before} ч.")
+        logger.info(
+            f"Напоминание успешно отправлено пользователю ID {user_id} "
+            f"за {hours_before} ч."
+        )
         return True
 
     except Exception as e:
-        logger.error(f"Ошибка при отправке напоминания пользователю ID {user_id}: {str(e)}")
+        logger.error(
+            f"Ошибка при отправке напоминания пользователю ID {user_id}: {str(e)}"
+        )
         return False
 
 
@@ -88,8 +96,7 @@ def send_reminder(self, reminder_id: int):
     with SyncSessionLocal() as session:
         try:
             reminder = session.execute(
-                select(BookingReminder)
-                .where(reminder_id == BookingReminder.id)
+                select(BookingReminder).where(reminder_id == BookingReminder.id)
             ).scalar_one_or_none()
 
             if not reminder:
@@ -97,12 +104,42 @@ def send_reminder(self, reminder_id: int):
                 return {"status": "skipped", "reason": "reminder_not_found"}
 
             if reminder.status in ["sent", "cancelled", "skipped", "processing"]:
-                logger.info(f"Напоминание ID={reminder_id} уже обработано: {reminder.status}")
+                logger.info(
+                    f"Напоминание ID={reminder_id} уже обработано: {reminder.status}"
+                )
                 return {"status": "skipped", "reason": f"already_{reminder.status}"}
 
             if reminder.status != "scheduled":
-                logger.info(f"Напоминание ID={reminder_id} имеет неподходящий статус: {reminder.status}")
+                logger.info(
+                    f"Напоминание ID={reminder_id} имеет неподходящий статус: "
+                    f"{reminder.status}"
+                )
                 return {"status": "skipped", "reason": f"status_{reminder.status}"}
+
+            now_msk = datetime.now(MSK)
+
+            remind_at_msk = (
+                reminder.remind_at.astimezone(MSK)
+                if reminder.remind_at.tzinfo
+                else reminder.remind_at.replace(tzinfo=MSK)
+            )
+
+            if now_msk > remind_at_msk + timedelta(seconds=MAX_REMINDER_DELAY_SECONDS):
+                reminder.status = "skipped"
+                reminder.error_message = "reminder_time_missed"
+                session.commit()
+
+                logger.warning(
+                    f"Напоминание ID={reminder_id} пропущено: "
+                    f"remind_at={remind_at_msk}, now={now_msk}, "
+                    f"hours_before={reminder.hours_before}"
+                )
+
+                return {
+                    "status": "skipped",
+                    "reason": "reminder_time_missed",
+                    "reminder_id": reminder.id,
+                }
 
             reminder.status = "processing"
             session.commit()
@@ -112,7 +149,7 @@ def send_reminder(self, reminder_id: int):
                 .options(
                     joinedload(Booking.specialist),
                     joinedload(Booking.service),
-                    joinedload(Booking.user)
+                    joinedload(Booking.user),
                 )
                 .where(Booking.id == reminder.booking_id)
             ).scalars().first()
@@ -129,8 +166,11 @@ def send_reminder(self, reminder_id: int):
                 session.commit()
                 return {"status": "skipped", "reason": "booking_cancelled"}
 
-            now_msk = datetime.now(MSK)
-            booking_dt_msk = booking.booking_datetime.astimezone(MSK)
+            booking_dt_msk = (
+                booking.booking_datetime.astimezone(MSK)
+                if booking.booking_datetime.tzinfo
+                else booking.booking_datetime.replace(tzinfo=MSK)
+            )
 
             if booking_dt_msk <= now_msk:
                 reminder.status = "skipped"
@@ -146,10 +186,12 @@ def send_reminder(self, reminder_id: int):
 
             success = send_reminder_notification(
                 user_id=booking.user.telegram_id,
-                specialist_name=f"{booking.specialist.first_name} {booking.specialist.last_name}",
+                specialist_name=(
+                    f"{booking.specialist.first_name} {booking.specialist.last_name}"
+                ),
                 service_name=booking.service.label,
                 booking_datetime=booking.booking_datetime,
-                hours_before=reminder.hours_before
+                hours_before=reminder.hours_before,
             )
 
             if success:
@@ -170,11 +212,13 @@ def send_reminder(self, reminder_id: int):
 
         except Exception as e:
             session.rollback()
-            logger.error(f"Ошибка в задаче reminder_id={reminder_id}, task_id={task_id}: {str(e)}")
+            logger.error(
+                f"Ошибка в задаче reminder_id={reminder_id}, "
+                f"task_id={task_id}: {str(e)}"
+            )
 
             reminder = session.execute(
-                select(BookingReminder)
-                .where(reminder_id == BookingReminder.id)
+                select(BookingReminder).where(reminder_id == BookingReminder.id)
             ).scalar_one_or_none()
 
             if reminder:

@@ -60,6 +60,18 @@ services:
              uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers"
     networks:
       - app-network
+  frontend:
+    build:
+      context: ./frontend/lpro-frontend
+      dockerfile: Dockerfile
+    container_name: l_pro_bot-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - app-network
 
   celery_worker:
     build:
