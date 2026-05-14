@@ -7,22 +7,59 @@ from sqlalchemy import Integer, ForeignKey, DateTime, String, Boolean, Date, Tim
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.database import Base
-
+from core.encryption import encryption_service, make_hash
 
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     telegram_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True, index=True)
+
     username: Mapped[str | None] = mapped_column(String, nullable=True)
     first_name: Mapped[str] = mapped_column(String, nullable=False)
     last_name: Mapped[str | None] = mapped_column(String, nullable=True)
     patronymic: Mapped[str | None] = mapped_column(String, nullable=True)
     phone_number: Mapped[str | None] = mapped_column(String, nullable=True)
+    phone_hash: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Relationships
     bookings: Mapped[List["Booking"]] = relationship(back_populates="user")
+
+    @property
+    def decrypted_username(self) -> str | None:
+        return encryption_service.decrypt(self.username)
+
+    @property
+    def decrypted_first_name(self) -> str:
+        return encryption_service.decrypt(self.first_name) or ""
+
+    @property
+    def decrypted_last_name(self) -> str | None:
+        return encryption_service.decrypt(self.last_name)
+
+    @property
+    def decrypted_patronymic(self) -> str | None:
+        return encryption_service.decrypt(self.patronymic)
+
+    @property
+    def decrypted_phone_number(self) -> str | None:
+        return encryption_service.decrypt(self.phone_number)
+
+    def set_private_data(
+            self,
+            first_name: str,
+            last_name: str | None = None,
+            patronymic: str | None = None,
+            phone_number: str | None = None,
+            username: str | None = None
+    ) -> None:
+        self.first_name = encryption_service.encrypt(first_name) or ""
+        self.last_name = encryption_service.encrypt(last_name)
+        self.patronymic = encryption_service.encrypt(patronymic)
+        self.phone_number = encryption_service.encrypt(phone_number)
+        self.username = encryption_service.encrypt(username)
+        self.phone_hash = make_hash(phone_number)
 
 
 class Service(Base):  # класс процедур/услуг

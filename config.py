@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     ENVIRONMENT: str = "dev"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
-
+    FERNET_SECRET_KEY: str
     def get_allowed_origins(self) -> list[str]:
         return [
             origin.strip()

@@ -46,7 +46,7 @@ class BookingService:
             if user is None:
                 logger.warning(f"Пользователь не найден: ID {booking_data.user_id}")
                 raise HTTPException(status_code=404, detail="Клиент не найден")
-            logger.debug(f"Пользователь найден: {user.first_name} {user.last_name}")
+            logger.debug(f"Пользователь найден: ID {user.id}")
 
             logger.debug(
                 f"Проверка связи специалист-услуга: specialist_id={booking_data.specialist_id}, "
@@ -86,9 +86,9 @@ class BookingService:
                 logger.debug(f'Время для уведомления (MSK): {notification_time}')
                 client_full_name = " ".join(
                     part for part in [
-                        user.last_name,
-                        user.first_name,
-                        user.patronymic
+                        user.decrypted_last_name,
+                        user.decrypted_first_name,
+                        user.decrypted_patronymic
                     ]
                     if part
                 )
@@ -99,7 +99,7 @@ class BookingService:
                     service_name=service.label,
                     booking_datetime=notification_time,
                     client_full_name=client_full_name,
-                    client_phone=user.phone_number
+                    client_phone=user.decrypted_phone_number
                 )
                 logger.debug(f"Уведомление отправлено успешно")
             except Exception as notify_error:
