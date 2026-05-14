@@ -4,6 +4,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from core.rate_limit import limiter
+from fastapi import Request
 
 from api.dao import ScheduleDAO
 from api.schemas import (
@@ -20,6 +22,7 @@ from services.service_service import ServiceService
 from services.specialist_service import SpecialistServiceClass
 from services.user_service import UserService
 
+
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 
 api_router = APIRouter(prefix="/api")
@@ -28,16 +31,19 @@ api_router = APIRouter(prefix="/api")
 # Service Endpoints
 @api_router.post("/services",
                  summary="Добавить услугу",
-                 tags=["Service Endpoints"])
+                 tags=["Service Endpoints"],
+                 dependencies=[Depends(require_admin)])
 async def create_new_service(
         service_data: ServiceCreate,
         session: AsyncSession = Depends(db.get_db_with_commit)) -> ServiceModel:
     return await ServiceService.create_service(session, service_data)
 
 
-@api_router.patch("/services/{service_id}",
-                  summary="Обновить услугу",
-                  tags=["Service Endpoints"])
+@api_router.patch(
+    "/services/{service_id}",
+    summary="Обновить услугу",
+    tags=["Service Endpoints"],
+    dependencies=[Depends(require_admin)])
 async def update_service(
         service_id: int,
         service_data: ServiceUpdate,
@@ -85,18 +91,22 @@ async def get_specialist(specialist_id: int, session: AsyncSession = Depends(db.
     return await SpecialistServiceClass.get_specialist(session, specialist_id)
 
 
-@api_router.post("/specialists",
-                 summary="Добавить специалиста",
-                 tags=["Specialist Endpoints"])
+@api_router.post(
+    "/specialists",
+    summary="Добавить специалиста",
+    tags=["Specialist Endpoints"],
+    dependencies=[Depends(require_admin)])
 async def create_specialist(
         specialist_data: SpecialistCreate,
         session: AsyncSession = Depends(db.get_db_with_commit)) -> SpecialistModel:
     return await SpecialistServiceClass.create_specialist(session, specialist_data)
 
 
-@api_router.post("/specialists/{specialist_id}/services",
-                 summary="Добавить услугу специалисту",
-                 tags=["Specialist Endpoints"])
+@api_router.post(
+    "/specialists/{specialist_id}/services",
+    summary="Добавить услугу специалисту",
+    tags=["Specialist Endpoints"],
+    dependencies=[Depends(require_admin)])
 async def add_service_to_specialist(
         specialist_service: SpecialistServiceCreate,
         session: AsyncSession = Depends(db.get_db_with_commit)):
@@ -112,9 +122,11 @@ async def get_specialist_services(
     return await SpecialistServiceClass.get_specialist_services(session, specialist_id)
 
 
-@api_router.patch("/specialists/{specialist_id}",
-                  summary="Обновить данные специалиста",
-                  tags=["Specialist Endpoints"])
+@api_router.patch(
+    "/specialists/{specialist_id}",
+    summary="Обновить данные специалиста",
+    tags=["Specialist Endpoints"],
+    dependencies=[Depends(require_admin)])
 async def update_specialist(specialist_id: int,
                             specialist_data: SpecialistUpdate,
                             session: AsyncSession = Depends(db.get_db_with_commit)
@@ -136,7 +148,12 @@ async def get_available_slots(
 
 # Booking Endpoints
 @api_router.post("/bookings", summary="Создать новую запись", tags=["Booking Endpoints"])
-async def create_booking(booking_data: BookingModel, session: AsyncSession = Depends(db.get_db_with_commit)):
+@limiter.limit("5/minute")
+async def create_booking(
+    request: Request,
+    booking_data: BookingModel,
+    session: AsyncSession = Depends(db.get_db_with_commit)
+):
     return await BookingService.create_booking(session, booking_data)
 
 
@@ -148,16 +165,24 @@ async def get_bookings(
     return await BookingService.get_user_bookings(session, telegram_id)
 
 
-@api_router.delete("/bookings/{booking_id}", summary="Отменить бронирование", tags=["Booking Endpoints"])
+@api_router.delete(
+    "/bookings/{booking_id}",
+    summary="Отменить бронирование",
+    tags=["Booking Endpoints"],
+    dependencies=[Depends(require_admin)]
+)
 async def cancel_booking_endpoint(booking_id: int) -> dict:
     success = await BookingService.cancel_booking(booking_id)
     if success:
         return {"message": "Бронирование успешно отменено"}
     raise HTTPException(status_code=404, detail="Бронирование не найдено или уже отменено")
 
-
 # Schedule Endpoints
-@api_router.post("/schedules", summary="Добавить расписание", tags=["Schedule Endpoints"])
+@api_router.post(
+    "/schedules",
+    summary="Добавить расписание",
+    tags=["Schedule Endpoints"],
+    dependencies=[Depends(require_admin)])
 async def create_schedule(
         schedule_data: SpecialistScheduleModel,
         session: AsyncSession = Depends(db.get_db_with_commit)
@@ -165,7 +190,11 @@ async def create_schedule(
     return await ScheduleService.create_schedule(session, schedule_data)
 
 
-@api_router.patch("/schedules/{schedule_id}", summary="Обновить расписание", tags=["Schedule Endpoints"])
+@api_router.patch(
+    "/schedules/{schedule_id}",
+    summary="Обновить расписание",
+    tags=["Schedule Endpoints"],
+    dependencies=[Depends(require_admin)])
 async def update_schedule(
         schedule_id: int,
         schedule_data: SpecialistScheduleModel,
@@ -191,8 +220,11 @@ async def get_specialist_schedules(
     return await ScheduleService.get_specialist_schedules(session, specialist_id)
 
 
-@api_router.delete("/schedules/{specialist_id}",
-                   summary="Очистить расписание специалиста", tags=["Schedule Endpoints"])
+@api_router.delete(
+    "/schedules/{specialist_id}",
+    summary="Очистить расписание специалиста",
+    tags=["Schedule Endpoints"],
+    dependencies=[Depends(require_admin)])
 async def delete_specialist_schedule(specialist_id: int,
                                      session: AsyncSession = Depends(db.get_db_with_commit)):
     return await ScheduleDAO.clear_existing_schedule(session, specialist_id)

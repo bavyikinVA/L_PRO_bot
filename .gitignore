@@ -24,8 +24,6 @@ venv/
 # Базы данных и миграции
 *.sqlite3
 *.db
-alembic.ini
-seed_data.py
 
 # Логи
 *.log

@@ -30,6 +30,18 @@ class Settings(BaseSettings):
     FRONT_SITE: str
     UPLOAD_FOLDER: str = '/static/images/'
 
+    WEBHOOK_SECRET: str
+
+    ENVIRONMENT: str = "dev"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    def get_allowed_origins(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.ALLOWED_ORIGINS.split(",")
+            if origin.strip()
+        ]
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8"
@@ -37,10 +49,10 @@ class Settings(BaseSettings):
 
     def get_webhook_url(self) -> str:
         """Возвращает URL вебхука с кодированием специальных символов."""
-        return f"{self.BASE_SITE}/webhook"
+        return f"{self.BASE_SITE}/webhook/{self.WEBHOOK_SECRET}"
 
     def get_tg_api_url(self) -> str:
-        """Возвращает URL вебхука с кодированием специальных символов."""
+        """Возвращает URL TG с Bot Token."""
         return f"{self.TG_API_SITE}/bot{self.BOT_TOKEN}"
 
     def get_db_url(self) -> str:

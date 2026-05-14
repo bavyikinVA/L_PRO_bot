@@ -1,18 +1,21 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from fastapi.staticfiles import StaticFiles
 from aiogram.types import Update
 from aiogram.exceptions import TelegramBadRequest
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from fastapi.responses import JSONResponse
+
 
 from bot.create_bot import dp, bot, stop_bot, start_bot
 from api.router import api_router
 from config import settings
-
 from database.database import async_session_maker
 from services.reminder_service import ReminderService
-
+from core.rate_limit import limiter
 
 async def send_admin_msg(client, text):
     for admin in settings.ADMIN_IDS:
@@ -47,48 +50,72 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 app.mount('/static', StaticFiles(directory='static'), name='static')
 
-# Подключаем API роутеры
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "Слишком много запросов. Попробуйте позже."
+        },
+    )
+
 app.include_router(api_router)
 
-# Добавляем middleware для CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
+allowed_origins = settings.get_allowed_origins()
+
+cors_kwargs = {
+    "allow_origins": allowed_origins,
+    "allow_credentials": True,
+    "allow_methods": ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    "allow_headers": [
+        "Content-Type",
+        "Authorization",
+        "X-Telegram-Init-Data",
     ],
-    allow_origin_regex=r"https://.*\.ngrok-free\.app",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+}
 
-@app.post("/webhook")
-async def webhook(request: Request) -> None:
-    logger.info("Received webhook request")
-    update = Update.model_validate(await request.json(), context={"bot": bot})
-    async with async_session_maker() as session:
-        await dp.feed_update(bot, update, session=session)
-    logger.info("Update processed")
+if settings.ENVIRONMENT == "dev":
+    cors_kwargs["allow_origin_regex"] = r"https://.*\.ngrok-free\.app"
 
-@app.post("/webhook")
-async def webhook(request: Request):
+app.add_middleware(CORSMiddleware, **cors_kwargs)
+
+
+@app.post("/webhook/{secret}")
+@limiter.limit("60/minute")
+async def webhook(secret: str, request: Request):
+    if secret != settings.WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     logger.info("Received webhook request")
+
     try:
-        update = Update.model_validate(await request.json(), context={"bot": bot})
+        update = Update.model_validate(
+            await request.json(),
+            context={"bot": bot}
+        )
+
         async with async_session_maker() as session:
             await dp.feed_update(bot, update, session=session)
+
         logger.info("Update processed")
+
     except TelegramBadRequest as e:
         error_text = str(e).lower()
+
         if "query is too old" in error_text or "query id is invalid" in error_text:
             logger.warning(f"Старый callback Telegram проигнорирован: {e}")
         else:
             logger.exception(f"TelegramBadRequest при обработке webhook: {e}")
+
     except Exception as e:
         logger.exception(f"Ошибка при обработке webhook: {e}")
+
     return {"ok": True}
 
-@app.get("/check")
-async def check():
-    return {"status": "ok", "bot": str(bot)}
+@app.get("/health")
+async def health():
+    return {"status": "ok"}

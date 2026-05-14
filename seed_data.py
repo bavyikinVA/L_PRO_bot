@@ -6,13 +6,12 @@ from database.models import Service, Specialist, SpecialistService
 
 
 SPECIALISTS = [
-    (1, "Людмила", "Микрюкова", "2 года", "app/static/images/master_mikryukova.jpg"),
-    (2, "Анна", "Морозова", "5 лет", "app/static/images/master_morozova.jpg"),
-    (3, "Андрей", "Кузнецов", "6 лет", "app/static/images/master_kuznetsov.jpg"),
-    (4, "Мария", "Попова", "4 года", "app/static/images/master_popova.jpg"),
-    (5, "Ольга", "Бондаренко", "7 лет", "app/static/images/master_bondarenko.jpg"),
-    (6, "Дарья", "Иванова", "5 лет", "app/static/images/master_ivanova.jpg"),
-    (7, "Ирина", "Игнатова", "8 лет", "app/static/images/master_ignatova.jpg"),
+    (1, "Анна", "Морозова", "5 лет", "app/static/images/master_morozova.jpg"),
+    (2, "Андрей", "Кузнецов", "6 лет", "app/static/images/master_kuznetsov.jpg"),
+    (3, "Мария", "Попова", "4 года", "app/static/images/master_popova.jpg"),
+    (4, "Ольга", "Бондаренко", "7 лет", "app/static/images/master_bondarenko.jpg"),
+    (5, "Дарья", "Иванова", "5 лет", "app/static/images/master_ivanova.jpg"),
+    (6, "Ирина", "Игнатова", "8 лет", "app/static/images/master_ignatova.jpg"),
 ]
 
 SERVICES = [
