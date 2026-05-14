@@ -31,7 +31,6 @@ venv/
 # Статические и временные файлы
 /static/uploads/
 /static/cache/
-/static/images/
 
 # MacOS
 .DS_Store
