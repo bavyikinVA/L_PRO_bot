@@ -10,10 +10,14 @@ from sqlalchemy.orm import joinedload
 
 from api.dao import BookingDAO, SpecialistDAO, ServiceDAO, UserDAO
 from api.schemas import BookingModel
-from bot.utils import send_booking_notification
 from database.database import async_session_maker
 from database.models import Booking, SpecialistService
-from services.reminder_service import ReminderService
+from events.booking import (
+    BOOKING_EVENTS_TOPIC,
+    build_booking_cancelled_event,
+    build_booking_created_event,
+)
+from events.outbox_service import OutboxService
 from services.user_service import UserService
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -74,42 +78,48 @@ class BookingService:
                 specialist_id=booking_data.specialist_id,
                 user_id=booking_data.user_id,
                 service_id=booking_data.service_id,
-                booking_datetime=booking_data.booking_datetime
+                booking_datetime=booking_data.booking_datetime,
+                commit=False,
             )
+            await session.flush()
+            await session.refresh(new_booking)
             logger.success(f"Бронь создана успешно: ID {new_booking.id}, datetime={new_booking.booking_datetime}")
 
+            client_full_name = " ".join(
+                part for part in [
+                    user.decrypted_last_name,
+                    user.decrypted_first_name,
+                    user.decrypted_patronymic
+                ]
+                if part
+            )
+
+            event = build_booking_created_event(
+                booking_id=new_booking.id,
+                user_id=user.id,
+                telegram_id=user.telegram_id,
+                client_full_name=client_full_name,
+                client_phone=user.decrypted_phone_number,
+                service_id=service.id,
+                service_name=service.label,
+                specialist_id=specialist.id,
+                specialist_name=f"{specialist.first_name} {specialist.last_name}",
+                booking_datetime=new_booking.booking_datetime.astimezone(MSK),
+                duration_minutes=new_booking.duration_minutes,
+            )
+            await OutboxService.add_event(
+                session=session,
+                topic=BOOKING_EVENTS_TOPIC,
+                key=str(new_booking.id),
+                aggregate_type="booking",
+                aggregate_id=new_booking.id,
+                event=event,
+            )
+
             booking_result = BookingModel.model_validate(new_booking)
+            await session.commit()
 
-            try:
-                logger.debug(f"Отправка уведомления пользователю Telegram ID: {user.telegram_id}")
-                notification_time = new_booking.booking_datetime.astimezone(MSK)
-                logger.debug(f'Время для уведомления (MSK): {notification_time}')
-                client_full_name = " ".join(
-                    part for part in [
-                        user.decrypted_last_name,
-                        user.decrypted_first_name,
-                        user.decrypted_patronymic
-                    ]
-                    if part
-                )
-
-                await send_booking_notification(
-                    user_id=user.telegram_id,
-                    specialist_name=f"{specialist.first_name} {specialist.last_name}",
-                    service_name=service.label,
-                    booking_datetime=notification_time,
-                    client_full_name=client_full_name,
-                    client_phone=user.decrypted_phone_number
-                )
-                logger.debug(f"Уведомление отправлено успешно")
-            except Exception as notify_error:
-                logger.error(f"Ошибка при отправке уведомления: {str(notify_error)}")
-
-            try:
-                await ReminderService.create_reminders_for_booking(session=session, booking=new_booking)
-            except Exception as reminder_error:
-                logger.warning(f'Ошибка при планировании напоминаний: {str(reminder_error)}')
-
+            # Уведомления и напоминания теперь создаются асинхронно через Kafka consumer.
             return booking_result
 
         except Exception as e:
@@ -254,15 +264,30 @@ class BookingService:
                     logger.info(f"Бронь ID {booking_id} уже отменена")
                     return True
 
-                await ReminderService.cancel_reminders_for_booking(session, booking.id)
-
                 booking.is_cancelled = True
                 booking.status = "cancelled"
+
+                event = build_booking_cancelled_event(
+                    booking_id=booking.id,
+                    user_id=booking.user_id,
+                    telegram_id=booking.user.telegram_id if booking.user else None,
+                    service_id=booking.service_id,
+                    specialist_id=booking.specialist_id,
+                    booking_datetime=booking.booking_datetime.astimezone(MSK),
+                )
+                await OutboxService.add_event(
+                    session=session,
+                    topic=BOOKING_EVENTS_TOPIC,
+                    key=str(booking.id),
+                    aggregate_type="booking",
+                    aggregate_id=booking.id,
+                    event=event,
+                )
 
                 session.add(booking)
                 await session.commit()
 
-                logger.info(f"Бронь {booking_id} успешно отменена.")
+                logger.info(f"Бронь {booking_id} успешно отменена. Событие booking.cancelled сохранено в outbox.")
                 return True
 
             except Exception as e:

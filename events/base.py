@@ -1,0 +1,18 @@
+from datetime import datetime, timezone
+from typing import Any
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel, Field
+
+
+class EventEnvelope(BaseModel):
+    """Единый контракт доменного события для Kafka."""
+
+    event_id: UUID = Field(default_factory=uuid4)
+    event_type: str
+    event_version: int = 1
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    producer: str
+    correlation_id: UUID = Field(default_factory=uuid4)
+    causation_id: UUID | None = None
+    payload: dict[str, Any]

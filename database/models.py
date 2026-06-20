@@ -1,10 +1,12 @@
 from datetime import date, time
 from datetime import datetime
+import uuid
 from typing import List
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Integer, ForeignKey, DateTime, String, Boolean, Date, Time, Index, UniqueConstraint, JSON
+from sqlalchemy import Integer, ForeignKey, DateTime, String, Boolean, Date, Time, Index, UniqueConstraint, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import UUID
 
 from database.database import Base
 from core.encryption import encryption_service, make_hash
@@ -183,6 +185,48 @@ class BookingReminder(Base):
     __table_args__ = (
         UniqueConstraint("booking_id", "hours_before", name="uq_booking_reminder_once"),
         Index("ix_booking_reminders_status_remind_at", "status", "remind_at"),
+    )
+
+
+
+class OutboxEvent(Base):
+    __tablename__ = "outbox_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    topic: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    event_key: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    aggregate_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    aggregate_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    event_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    headers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(ZoneInfo("UTC")),
+        nullable=False,
+        index=True
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_outbox_events_status_created_at", "status", "created_at"),
+    )
+
+
+class ProcessedEvent(Base):
+    __tablename__ = "processed_events"
+
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    consumer_name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(ZoneInfo("UTC")),
+        nullable=False,
+        index=True
     )
 
 class AuditLog(Base):

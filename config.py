@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_PASSWORD: str | None = None
 
+    # kafka / event-driven part
+    KAFKA_BOOTSTRAP_SERVERS: str = "kafka:9092"
+    KAFKA_BOOKING_EVENTS_TOPIC: str = "lpro.booking.events"
+    OUTBOX_BATCH_SIZE: int = 50
+    OUTBOX_POLL_INTERVAL_SECONDS: int = 2
+
     # web part
     BASE_SITE: str
     TG_API_SITE: str
