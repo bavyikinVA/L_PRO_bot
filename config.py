@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     KAFKA_NOTIFICATION_EVENTS_TOPIC: str = "lpro.notification.events"
     OUTBOX_BATCH_SIZE: int = 50
     OUTBOX_POLL_INTERVAL_SECONDS: int = 2
+    KAFKA_CONSUMER_MAX_RETRIES: int = 3
+    KAFKA_CONSUMER_RETRY_DELAY_SECONDS: int = 2
+
 
     # web part
     BASE_SITE: str
