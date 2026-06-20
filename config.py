@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # kafka / event-driven part
     KAFKA_BOOTSTRAP_SERVERS: str = "kafka:9092"
     KAFKA_BOOKING_EVENTS_TOPIC: str = "lpro.booking.events"
+    KAFKA_BOOKING_EVENTS_DLQ_TOPIC: str = "lpro.booking.events.dlq"
+    KAFKA_REMINDER_EVENTS_TOPIC: str = "lpro.reminder.events"
+    KAFKA_NOTIFICATION_EVENTS_TOPIC: str = "lpro.notification.events"
     OUTBOX_BATCH_SIZE: int = 50
     OUTBOX_POLL_INTERVAL_SECONDS: int = 2
 

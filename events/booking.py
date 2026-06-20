@@ -1,9 +1,11 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from events.base import EventEnvelope
 
 BOOKING_EVENTS_TOPIC = "lpro.booking.events"
+BOOKING_EVENTS_DLQ_TOPIC = "lpro.booking.events.dlq"
 BOOKING_CREATED = "booking.created"
 BOOKING_CANCELLED = "booking.cancelled"
 

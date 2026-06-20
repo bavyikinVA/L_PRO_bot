@@ -21,16 +21,23 @@ class KafkaEventProducer:
             enable_idempotence=True,
         )
         await self._producer.start()
-        logger.info("Kafka producer started")
+        logger.info("[KAFKA-PRODUCER] started bootstrap_servers={}", settings.KAFKA_BOOTSTRAP_SERVERS)
 
     async def stop(self) -> None:
         if self._producer is not None:
             await self._producer.stop()
             self._producer = None
-            logger.info("Kafka producer stopped")
+            logger.info("[KAFKA-PRODUCER] stopped")
 
     async def send(self, *, topic: str, key: str, value: dict) -> None:
         if self._producer is None:
             await self.start()
         assert self._producer is not None
-        await self._producer.send_and_wait(topic=topic, key=key, value=value)
+        metadata = await self._producer.send_and_wait(topic=topic, key=key, value=value)
+        logger.debug(
+            "[KAFKA-PRODUCER] sent topic={} partition={} offset={} key={}",
+            metadata.topic,
+            metadata.partition,
+            metadata.offset,
+            key,
+        )
